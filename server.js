@@ -8,6 +8,11 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+
 // POST route
 app.post("/api/feedback", async (req, res) => {
   const { rating, review } = req.body;
@@ -106,5 +111,6 @@ app.get("/api/feedbacks", (req, res) => {
 });
 
 export default app;
+
 
 
