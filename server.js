@@ -1,29 +1,51 @@
 import express from "express";
-import fs from "fs";
 import cors from "cors";
-// In Node 24+, fetch is built-in. Remove node-fetch import if not needed.
-// import fetch from "node-fetch";
+import mongoose from "mongoose";
+import fetch from "node-fetch"; // Assuming you need this if using an older Node version on Vercel
+
+// --- 1. Database Setup ---
+const MONGO_URI = process.env.MONGO_URI;
+if (!MONGO_URI) {
+  console.error("MONGO_URI environment variable not set.");
+  // In a real serverless deployment, this might be handled differently,
+  // but we'll proceed assuming it will be set in Vercel.
+}
+
+// Connect to MongoDB
+mongoose.connect(MONGO_URI)
+  .then(() => console.log("MongoDB connected successfully."))
+  .catch(err => console.error("MongoDB connection error:", err));
+
+// Define the Feedback Schema and Model
+const feedbackSchema = new mongoose.Schema({
+  rating: { type: Number, required: true },
+  review: { type: String, required: true },
+  aiResponse: { type: String, required: true },
+  recommendedAction: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now },
+});
+
+const Feedback = mongoose.model("Feedback", feedbackSchema);
+// -------------------------
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// Secure API Key
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // POST route
 app.post("/api/feedback", async (req, res) => {
   const { rating, review } = req.body;
 
-  let data = fs.existsSync("./feedback.json")
-    ? JSON.parse(fs.readFileSync("./feedback.json"))
-    : [];
+  // Ensure API Key is available
+  if (!GEMINI_API_KEY) {
+    return res.status(500).json({ error: "Gemini API Key not configured." });
+  }
 
-  const GEMINI_API_KEY = "AIzaSyDTdE2BzX9Npmhi0FcTPZNz1tSWot5DlsQ";
+  // ... (Your AI Prompt logic remains the same) ...
 
-  // Prompt for AI Response
   const responsePrompt = `
 You are a customer service assistant.
 A user gave a ${rating}-star rating and wrote: "${review}".
@@ -34,7 +56,6 @@ Write a short, empathetic response:
 Keep it under 2 sentences.
 `;
 
-  // Prompt for Recommended Action
   const actionPrompt = `
 You are a customer service strategist.
 A user gave a ${rating}-star rating and wrote: "${review}".
@@ -49,9 +70,10 @@ Keep the action concise (1 sentence).
   let recommendedAction = "Follow up with the customer."; // fallback
 
   try {
-    // AI Response
+    // AI Response (Using the fetch API)
     const response1 = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      // ... (Rest of fetch call remains the same) ...
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -69,6 +91,7 @@ Keep the action concise (1 sentence).
     // Recommended Action
     const response2 = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      // ... (Rest of fetch call remains the same) ...
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,31 +109,45 @@ Keep the action concise (1 sentence).
     console.error("AI generation error:", err);
   }
 
-  const feedback = {
-    rating,
-    review,
-    aiResponse,
-    recommendedAction,
-    timestamp: new Date().toISOString(),
-  };
-
-  data.push(feedback);
-  fs.writeFileSync("./feedback.json", JSON.stringify(data, null, 2));
-
-  res.json({ success: true, aiResponse, recommendedAction });
+  // --- Database Save (REPLACED FS) ---
+  try {
+    const newFeedback = new Feedback({
+      rating,
+      review,
+      aiResponse,
+      recommendedAction,
+      // timestamp is auto-generated
+    });
+    await newFeedback.save();
+    res.json({ success: true, aiResponse, recommendedAction });
+  } catch (dbErr) {
+    console.error("Database save error:", dbErr);
+    res.status(500).json({ success: false, error: "Failed to save feedback." });
+  }
+  // ------------------------------------
 });
 
 // GET route
-app.get("/api/feedbacks", (req, res) => {
-  if (fs.existsSync("./feedback.json")) {
-    const data = JSON.parse(fs.readFileSync("./feedback.json"));
-    res.json(data);
-  } else {
-    res.json([]);
+app.get("/api/feedbacks", async (req, res) => {
+  // --- Database Fetch (REPLACED FS) ---
+  try {
+    const feedbacks = await Feedback.find().sort({ timestamp: -1 }); // Get latest first
+    res.json(feedbacks);
+  } catch (err) {
+    console.error("Database fetch error:", err);
+    res.status(500).json({ error: "Failed to retrieve feedbacks." });
   }
+  // ------------------------------------
 });
 
+// --- 2. Serverless Export ---
+// Export the app instance instead of calling app.listen()
 export default app;
+
+// IMPORTANT: Do not include the original app.listen() block:
+// const PORT = 5000;
+// app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
 
 
 
