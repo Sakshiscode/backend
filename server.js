@@ -5,6 +5,7 @@ import cors from "cors";
 // import fetch from "node-fetch";
 
 const app = express();
+module.exports = app;
 app.use(express.json());
 app.use(cors());
 
@@ -106,3 +107,4 @@ app.get("/api/feedbacks", (req, res) => {
 });
 
 export default app;
+
